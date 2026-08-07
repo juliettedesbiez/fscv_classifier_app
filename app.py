@@ -16,7 +16,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 from fscv_core import (
-    BUNDLES, PLOT_SETTINGS,
+    BUNDLES, PLOT_SETTINGS, VOLTAGE_VALUES,
     load_recording, window_recording, extract,
     load_bundle_models, predict_windows, aggregate_file,
 )
@@ -78,7 +78,7 @@ section[data-testid="stFileUploaderDropzone"] {{ border-color: {ACCENT}55 !impor
    with the icon svg sitting inside its first child div. */
 [data-testid="stFileChip"] > div:first-child {{
     background: white !important;
-    border: 1px solid #1a1a1a !important;
+    border: 1.5px solid #1a1a1a !important;
     border-radius: 7px !important;
 }}
 [data-testid="stFileChip"] svg {{
@@ -86,10 +86,9 @@ section[data-testid="stFileUploaderDropzone"] {{ border-color: {ACCENT}55 !impor
     fill: {ACCENT} !important;
 }}
 
-/* Sidebar width — a bit wider so mode names don't truncate, but only
-   while it's actually expanded, so the collapse animation still works */
-section[data-testid="stSidebar"][aria-expanded="true"] {{ width: 380px !important; }}
-section[data-testid="stSidebar"][aria-expanded="true"] > div:first-child {{ width: 380px !important; }}
+/* Sidebar width — a bit wider so mode names don't truncate */
+section[data-testid="stSidebar"] {{ width: 380px !important; }}
+section[data-testid="stSidebar"] > div:first-child {{ width: 380px !important; }}
 
 /* Hover-info icon + popover, replaces the click-to-expand stats glossary */
 .info-tooltip-wrap {{
@@ -180,7 +179,7 @@ def stat_card(label, value, placeholder=False, info=None):
 # ------------------------------------------------------------------
 # Header
 # ------------------------------------------------------------------
-# --- Title, subtitle, byline, and logo live here ---
+# --- EASILY EDITABLE: title, subtitle, byline, and logo live here ---
 header_col1, header_col2 = st.columns([4, 1])
 with header_col1:
     st.markdown('<div class="app-title" style="font-size:38px;">FSCV Serotonin Release Event Classifier</div>', unsafe_allow_html=True)
@@ -247,7 +246,7 @@ with st.sidebar:
 
     st.header("3 · Upload recordings")
     uploaded_files = st.file_uploader(
-        "FSCV .txt recordings (batch upload supported)",
+        "Raw FSCV .txt recordings (batch upload supported)",
         type=["txt"], accept_multiple_files=True,
         key=f"uploader_{st.session_state['uploader_key']}",
     )
@@ -268,11 +267,8 @@ def render_instructions():
 model(s), and the number of classes. Nothing else needs configuring.</li>
 <li><strong>Rename the display labels</strong> if you'd like different wording — this is
 cosmetic only.</li>
-<li><strong>Upload one or more <code>.txt</code> FSCV recordings.</strong> Batch upload is
-supported. Files should already be background-subtracted and passed through a Butterworth
-low-pass filter with a 5000 Hz cutoff (five times the 1000 V/s scan rate) before uploading —
-the app windows and classifies the signal as provided, it doesn't apply this preprocessing
-itself.</li>
+<li><strong>Upload one or more raw <code>.txt</code> FSCV recordings.</strong> Batch upload is
+supported.</li>
 <li><strong>Click Run classification.</strong> Each recording is windowed, classified
 window-by-window, and rolled up to one call per file using an <em>"any event override"</em>
 rule: if even one window in a file is classified as an event, the whole file is called
@@ -308,7 +304,14 @@ def process_file(file_obj, bundle, models):
 
     features = None
     if rep_window_idx is not None:
-        features = extract(windows[rep_window_idx], bundle["config"])
+        # Display-only sign correction, same principle as the colour plot:
+        # classification above already ran on the original (non-inverted)
+        # window, matching what the trained models learned from. This
+        # separately re-extracts features from an inverted copy of just
+        # that one representative window, purely so the stat cards show
+        # physically correct values (e.g. a genuine oxidation peak reads
+        # as positive) -- it has no effect on classification.
+        features = extract(-windows[rep_window_idx], bundle["config"])
 
     event_spans = [spans[i] for i in positive_idx]
 
@@ -347,7 +350,7 @@ if run_clicked and uploaded_files:
 
 
 # ------------------------------------------------------------------
-# Results display — Summary table + expandable detail
+# Results display — Option C: summary table + expandable detail
 # ------------------------------------------------------------------
 FEATURE_CSV_ORDER = [
     ("peak_current", "amplitude"), ("rise_time", "rise_time"), ("decay_time", "decay_time"),
@@ -433,19 +436,19 @@ with content_area.container():
 
             cols2 = st.columns(4)
             with cols2[0]:
-                dt = f"{r['features']['decay_time']:.2f} nA/f" if r["features"] else "—"
+                dt = f"{r['features']['decay_time']:.2f}" if r["features"] else "—"
                 stat_card("Decay time", dt,
                           info="Rate of signal decline per frame after the oxidation peak.")
             with cols2[1]:
-                pw = f"{r['features']['peak_width']:.0f} f" if r["features"] else "—"
+                pw = f"{r['features']['peak_width']:.0f}" if r["features"] else "—"
                 stat_card("Peak width (FWHM)", pw,
                           info="Width of the oxidation peak at half its maximum height.")
             with cols2[2]:
-                auc = f"{r['features']['auc_sero']:.0f} / {r['features']['auc_full']:.0f} a.u." if r["features"] else "—"
+                auc = f"{r['features']['auc_sero']:.0f} / {r['features']['auc_full']:.0f}" if r["features"] else "—"
                 stat_card("AUC (ox / full)", auc,
                           info="Area under the curve across the oxidation band, and across the whole window.")
             with cols2[3]:
-                orl = f"{r['features']['ox_red_ratio']:.2f} / {r['features']['ox_red_lag']:.0f} f" if r["features"] else "—"
+                orl = f"{r['features']['ox_red_ratio']:.2f} / {r['features']['ox_red_lag']:.0f}" if r["features"] else "—"
                 stat_card("Ox/Red ratio / lag", orl,
                           info="Ratio of the oxidation peak to the reduction trough, and the frame gap between the oxidation peak and reduction trough.")
 
@@ -455,20 +458,40 @@ with content_area.container():
             nV, nT = arr.shape
             fscv_hz = r["fscv_hz"]
             max_t = (nT - 1) / fscv_hz
-            norm = PLOT_SETTINGS.get_norm(arr)
+
+            # Display-only sign inversion: the raw .txt files (and every
+            # training/labelling file used to build the current models) use
+            # a sign convention that renders oxidation as blue and reduction
+            # as green on Pablo's colormap -- backwards from the physically
+            # expected polarity. This flips ONLY the array handed to imshow;
+            # `arr` itself (used above for classification) is untouched, so
+            # this has zero effect on windowing, features, or predictions --
+            # it only corrects what's drawn on screen.
+            arr_display = -arr
+            norm = PLOT_SETTINGS.get_norm(arr_display)
 
             fig, (ax, ax_track) = plt.subplots(
                 2, 1, figsize=(11, 5.2), dpi=150,
                 gridspec_kw={"height_ratios": [5, 0.6], "hspace": 0.06},
                 sharex=True,
             )
-            ax.imshow(arr, aspect="auto", cmap=PLOT_SETTINGS.custom, origin="lower",
+            ax.imshow(arr_display, aspect="auto", cmap=PLOT_SETTINGS.custom, origin="lower",
                        extent=[0, max_t, 0, nV], norm=norm)
 
             for (f0, f1) in r["event_spans"]:
                 ax.axvspan(f0 / fscv_hz, f1 / fscv_hz, color=ACCENT, alpha=0.25, lw=0)
 
-            ax.set_ylabel("Voltage index")
+            # Real voltage values on the y-axis instead of raw row index.
+            # The Jackson waveform is non-monotonic (rises 0.2V->1.0V, falls
+            # to -0.1V, rises back to 0.2V), so this can't be a simple linear
+            # relabel — each tick is placed at its actual row and labelled
+            # with the true voltage measured at that row.
+            n_ticks = 8
+            tick_rows = np.linspace(0, nV - 1, n_ticks).astype(int)
+            tick_rows = np.clip(tick_rows, 0, len(VOLTAGE_VALUES) - 1)
+            ax.set_yticks(tick_rows)
+            ax.set_yticklabels([f"{VOLTAGE_VALUES[i]:.2f}" for i in tick_rows])
+            ax.set_ylabel("Voltage (V)")
             ax.set_title(f"{r['filename']} \u2014 {len(r['event_spans'])} event window(s) highlighted")
             ax.tick_params(labelbottom=False)
 
