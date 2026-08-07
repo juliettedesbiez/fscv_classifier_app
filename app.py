@@ -247,7 +247,7 @@ with st.sidebar:
 
     st.header("3 · Upload recordings")
     uploaded_files = st.file_uploader(
-        "Raw FSCV .txt recordings (batch upload supported)",
+        "FSCV .txt recordings (batch upload supported)",
         type=["txt"], accept_multiple_files=True,
         key=f"uploader_{st.session_state['uploader_key']}",
     )
@@ -268,8 +268,11 @@ def render_instructions():
 model(s), and the number of classes. Nothing else needs configuring.</li>
 <li><strong>Rename the display labels</strong> if you'd like different wording — this is
 cosmetic only.</li>
-<li><strong>Upload one or more raw <code>.txt</code> FSCV recordings.</strong> Batch upload is
-supported.</li>
+<li><strong>Upload one or more <code>.txt</code> FSCV recordings.</strong> Batch upload is
+supported. Files should already be background-subtracted and passed through a Butterworth
+low-pass filter with a 5000 Hz cutoff (five times the 1000 V/s scan rate) before uploading —
+the app windows and classifies the signal as provided, it doesn't apply this preprocessing
+itself.</li>
 <li><strong>Click Run classification.</strong> Each recording is windowed, classified
 window-by-window, and rolled up to one call per file using an <em>"any event override"</em>
 rule: if even one window in a file is classified as an event, the whole file is called
