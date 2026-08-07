@@ -1,4 +1,4 @@
-# FSCV Event Classifier
+# FSCV Serotonin Release Event Classifier
 
 A local Streamlit tool for classifying raw FSCV recordings using one of three
 validated, pre-trained bundles. Built for Hashemi Lab scientists who run FSCV
@@ -19,6 +19,8 @@ fscv_app/
 ├── fscv_core.py
 ├── requirements.txt
 ├── README.md
+├── assets/
+│   └── imperial_logo.png
 └── models/
     ├── mlp_model_ipsc_3class.pkl
     ├── mlp_model_ipsc_binary.pkl
