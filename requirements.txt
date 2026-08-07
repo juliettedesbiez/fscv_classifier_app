@@ -1,0 +1,8 @@
+streamlit>=1.32
+numpy
+pandas
+scipy
+matplotlib
+torch
+scikit-learn
+xgboost
