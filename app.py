@@ -433,11 +433,11 @@ with content_area.container():
 
             cols2 = st.columns(4)
             with cols2[0]:
-                dt = f"{r['features']['decay_time']:.2f} nA/f" if r["features"] else "—" if r["features"] else "—"
+                dt = f"{r['features']['decay_time']:.2f} nA/f" if r["features"] else "—"
                 stat_card("Decay time", dt,
                           info="Rate of signal decline per frame after the oxidation peak.")
             with cols2[1]:
-                pw = f"{r['features']['peak_width']:.0f} f" if r["features"] else "—" if r["features"] else "—"
+                pw = f"{r['features']['peak_width']:.0f} f" if r["features"] else "—"
                 stat_card("Peak width (FWHM)", pw,
                           info="Width of the oxidation peak at half its maximum height.")
             with cols2[2]:
