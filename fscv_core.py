@@ -32,6 +32,18 @@ N_VOLTAGE_PTS = 1100
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 
 # ============================================================
+# Voltage lookup table — maps each of the 1100 row indices to its
+# real voltage value (Jackson waveform: 0.2V -> 1.0V -> -0.1V -> 0.2V).
+# Non-monotonic (rises, falls, rises again), so this can't be shown as a
+# simple linear axis relabel — used to build custom tick labels on the
+# colour plot instead, at the actual row position each voltage occurs.
+# ============================================================
+VOLTAGE_VALUES = np.loadtxt(
+    os.path.join(os.path.dirname(__file__), "data", "voltage_values.csv"),
+    delimiter=",",
+)
+
+# ============================================================
 # Preparation configs — baked in from fscv_config_ipsc.yaml /
 # fscv_config_organoid.yaml. No YAML upload in the app; these
 # are the exact values confirmed in the project.
@@ -91,7 +103,7 @@ BUNDLES = {
     },
     "organoid_binary": {
         "key": "organoid_binary",
-        "menu_label": "Gut Organoid — Binary",
+        "menu_label": "Organoid — Binary",
         "config": ORGANOID_CFG,
         "class_names": ["No Event", "Event"],
         "default_display_names": ["Baseline", "Serotonin"],
@@ -200,7 +212,7 @@ def extract(arr, cfg):
     return {
         "peak_current": float(ox.max()),
         "peak_voltage": float(ox.mean(axis=1).argmax() + v0),
-        "peak_width": float((ox_trace > ox_trace.max() * 0.5).sum()),
+        "peak_width": float((ox.mean(axis=1) > ox.mean(axis=1).max() * 0.5).sum()),
         "trough_current": float(red.min()),
         "auc_sero": float(np.abs(ox).sum()),
         "auc_full": float(np.abs(arr).sum()),
