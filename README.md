@@ -59,20 +59,6 @@ Opens at `localhost:8501`.
    windows highlighted, a per-window breakdown, and CSV export at both the
    batch and per-file level.
 
-## Known placeholders (pending Dr Hashemi's input)
-
-- **Amplitude** currently shows `peak_current` from the 17-feature
-  extraction. Open question: raw matrix max vs. an engineered feature, and
-  which voltage window.
-- **Confidence** currently shows the single winning-class probability of
-  the most confident event window (or the mean baseline probability for
-  baseline files). Open question: single window vs. averaged across all
-  contributing event windows.
-
-Both are isolated to `fscv_core.py::aggregate_file` (confidence) and the
-stat-card rendering in `app.py` (amplitude) — swapping either definition
-once confirmed doesn't require touching anything else.
-
 ## Out of scope for v1
 
 Event count, frequency, SNR, and baseline drift are deliberately not
