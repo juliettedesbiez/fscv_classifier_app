@@ -246,7 +246,7 @@ with st.sidebar:
 
     st.header("3 · Upload recordings")
     uploaded_files = st.file_uploader(
-        "Raw FSCV .txt recordings (batch upload supported)",
+        "FSCV .txt recordings (batch upload supported)",
         type=["txt"], accept_multiple_files=True,
         key=f"uploader_{st.session_state['uploader_key']}",
     )
@@ -267,8 +267,10 @@ def render_instructions():
 model(s), and the number of classes. Nothing else needs configuring.</li>
 <li><strong>Rename the display labels</strong> if you'd like different wording — this is
 cosmetic only.</li>
-<li><strong>Upload one or more raw <code>.txt</code> FSCV recordings.</strong> Batch upload is
-supported.</li>
+<li><strong>Upload one or more <code>.txt</code> FSCV recordings.</strong> Batch upload is
+supported. Files should already be passed through a Butterworth low-pass filter with a
+5000 Hz cutoff (five times the 1000 V/s scan rate) before uploading — the app applies
+background subtraction automatically, but does not apply this filtering itself.</li>
 <li><strong>Click Run classification.</strong> Each recording is windowed, classified
 window-by-window, and rolled up to one call per file using an <em>"any event override"</em>
 rule: if even one window in a file is classified as an event, the whole file is called
@@ -303,15 +305,13 @@ def process_file(file_obj, bundle, models):
     )
 
     features = None
+    rep_window_start = None
     if rep_window_idx is not None:
-        # Display-only sign correction, same principle as the colour plot:
-        # classification above already ran on the original (non-inverted)
-        # window, matching what the trained models learned from. This
-        # separately re-extracts features from an inverted copy of just
-        # that one representative window, purely so the stat cards show
-        # physically correct values (e.g. a genuine oxidation peak reads
-        # as positive) -- it has no effect on classification.
-        features = extract(-windows[rep_window_idx], bundle["config"])
+        # Sign correction now happens at the source (fscv_core.py's
+        # load_recording()), so this is the plain, un-inverted window --
+        # no display-only workaround needed here any more.
+        features = extract(windows[rep_window_idx], bundle["config"])
+        rep_window_start = spans[rep_window_idx][0]  # absolute start frame, for locating the peak marker
 
     event_spans = [spans[i] for i in positive_idx]
 
@@ -320,6 +320,7 @@ def process_file(file_obj, bundle, models):
         "file_class": file_class,
         "confidence": confidence,
         "features": features,
+        "rep_window_start": rep_window_start,
         "n_event_windows": len(positive_idx),
         "n_windows": len(windows),
         "event_spans": event_spans,
@@ -436,19 +437,19 @@ with content_area.container():
 
             cols2 = st.columns(4)
             with cols2[0]:
-                dt = f"{r['features']['decay_time']:.2f}" if r["features"] else "—"
+                dt = f"{r['features']['decay_time']:.2f} nA/f" if r["features"] else "—"
                 stat_card("Decay time", dt,
                           info="Rate of signal decline per frame after the oxidation peak.")
             with cols2[1]:
-                pw = f"{r['features']['peak_width']:.0f}" if r["features"] else "—"
+                pw = f"{r['features']['peak_width']:.0f} f" if r["features"] else "—"
                 stat_card("Peak width (FWHM)", pw,
-                          info="Width of the oxidation peak at half its maximum height.")
+                          info="Width of the oxidation peak, in frames, at half its maximum height.")
             with cols2[2]:
-                auc = f"{r['features']['auc_sero']:.0f} / {r['features']['auc_full']:.0f}" if r["features"] else "—"
+                auc = f"{r['features']['auc_sero']:.0f} / {r['features']['auc_full']:.0f} a.u." if r["features"] else "—"
                 stat_card("AUC (ox / full)", auc,
                           info="Area under the curve across the oxidation band, and across the whole window.")
             with cols2[3]:
-                orl = f"{r['features']['ox_red_ratio']:.2f} / {r['features']['ox_red_lag']:.0f}" if r["features"] else "—"
+                orl = f"{r['features']['ox_red_ratio']:.2f} / {r['features']['ox_red_lag']:.0f} f" if r["features"] else "—"
                 stat_card("Ox/Red ratio / lag", orl,
                           info="Ratio of the oxidation peak to the reduction trough, and the frame gap between the oxidation peak and reduction trough.")
 
@@ -459,27 +460,43 @@ with content_area.container():
             fscv_hz = r["fscv_hz"]
             max_t = (nT - 1) / fscv_hz
 
-            # Display-only sign inversion: the raw .txt files (and every
-            # training/labelling file used to build the current models) use
-            # a sign convention that renders oxidation as blue and reduction
-            # as green on Pablo's colormap -- backwards from the physically
-            # expected polarity. This flips ONLY the array handed to imshow;
-            # `arr` itself (used above for classification) is untouched, so
-            # this has zero effect on windowing, features, or predictions --
-            # it only corrects what's drawn on screen.
-            arr_display = -arr
-            norm = PLOT_SETTINGS.get_norm(arr_display)
+            # Sign correction now happens at the source (fscv_core.py's
+            # load_recording()), so `arr` is already correctly signed here
+            # -- no display-only inversion needed any more. Inverting again
+            # here would put the colour plot back to the wrong polarity.
+            norm = PLOT_SETTINGS.get_norm(arr)
 
             fig, (ax, ax_track) = plt.subplots(
                 2, 1, figsize=(11, 5.2), dpi=150,
                 gridspec_kw={"height_ratios": [5, 0.6], "hspace": 0.06},
                 sharex=True,
             )
-            ax.imshow(arr_display, aspect="auto", cmap=PLOT_SETTINGS.custom, origin="lower",
+            ax.imshow(arr, aspect="auto", cmap=PLOT_SETTINGS.custom, origin="lower",
                        extent=[0, max_t, 0, nV], norm=norm)
 
             for (f0, f1) in r["event_spans"]:
                 ax.axvspan(f0 / fscv_hz, f1 / fscv_hz, color=ACCENT, alpha=0.25, lw=0)
+
+            # Mark the exact peak-amplitude point (from the representative
+            # event window's features) with a labelled marker. Only drawn
+            # for non-baseline files, where features/rep_window_start exist.
+            if r["features"] is not None and r["rep_window_start"] is not None:
+                peak_frame_abs = r["rep_window_start"] + r["features"]["rise_time"]
+                peak_row = r["features"]["peak_voltage"]
+                peak_time_s = peak_frame_abs / fscv_hz
+                peak_amp = r["features"]["peak_current"]
+
+                ax.scatter([peak_time_s], [peak_row], s=90, marker="*",
+                           color="white", edgecolor=ACCENT, linewidth=1.5, zorder=5)
+                ax.annotate(
+                    f"Peak: {peak_amp:.2f} nA",
+                    xy=(peak_time_s, peak_row),
+                    xytext=(8, 10), textcoords="offset points",
+                    fontsize=9, fontweight="bold", color=ACCENT,
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
+                              edgecolor=ACCENT, alpha=0.9),
+                    zorder=6,
+                )
 
             # Real voltage values on the y-axis instead of raw row index.
             # The Jackson waveform is non-monotonic (rises 0.2V->1.0V, falls
