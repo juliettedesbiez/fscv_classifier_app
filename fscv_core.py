@@ -14,7 +14,14 @@ Contains:
     directly from the labelling app.
   - Model loading (cached) and per-window / per-file prediction, including
     the soft-voting ensemble for both binary bundles and the confirmed
-    0.03 spontaneous-probability boost for the iPSC 3-class MLP.
+    spontaneous/stimulated probability boost for the iPSC 3-class MLP.
+
+Sign convention: load_recording() inverts the raw array at the source
+(matching the -arr fix applied in make_windows_*.py and the labelling apps).
+All three bundles' models were retrained on sign-corrected data, so this is
+now safe to do at the source rather than as a display-only workaround in
+app.py -- the old arr_display = -arr / extract(-windows[...]) patches in
+app.py should be removed now that this is fixed here.
 """
 
 import os
@@ -72,7 +79,8 @@ ORGANOID_CFG = {
 }
 
 # ============================================================
-# The three validated bundles.
+# The three validated bundles. All three retrained post sign-fix,
+# post relabelling (organoid) -- see project logbook for full trajectory.
 # ============================================================
 
 BUNDLES = {
@@ -85,8 +93,15 @@ BUNDLES = {
         "n_classes": 3,
         "model_type": "mlp_only",
         "mlp_path": os.path.join(MODELS_DIR, "mlp_model_ipsc_3class.pkl"),
-        "boost": {"class_idx": 1, "factor": 0.03},  # confirmed 30 Jul 2026, two independent CV sweeps
-        "test_f1_macro": 0.7621,
+        # Two-part boost, tuned via sweep_boost_oof.py against CV out-of-fold
+        # predictions (not the test set), then confirmed once against the
+        # held-out test set. Replaces the old single-boost 0.03 value used
+        # pre-sign-fix.
+        "boost": [
+            {"class_idx": 1, "factor": 0.10},  # spontaneous
+            {"class_idx": 2, "factor": 1.00},  # stimulated (no-op, kept explicit)
+        ],
+        "test_f1_macro": 0.7267,
     },
     "ipsc_binary": {
         "key": "ipsc_binary",
@@ -99,7 +114,7 @@ BUNDLES = {
         "mlp_path": os.path.join(MODELS_DIR, "mlp_model_ipsc_binary.pkl"),
         "rf_path": os.path.join(MODELS_DIR, "rf_model_ipsc_binary.pkl"),
         "xgb_path": os.path.join(MODELS_DIR, "xgb_model_ipsc_binary.pkl"),
-        "test_f1_macro": 0.8902,
+        "test_f1_macro": 0.8712,
     },
     "organoid_binary": {
         "key": "organoid_binary",
@@ -112,7 +127,7 @@ BUNDLES = {
         "mlp_path": os.path.join(MODELS_DIR, "mlp_model_organoid.pkl"),
         "rf_path": os.path.join(MODELS_DIR, "rf_model_organoid.pkl"),
         "xgb_path": os.path.join(MODELS_DIR, "xgb_model_organoid.pkl"),
-        "test_f1_macro": 0.9044,
+        "test_f1_macro": 0.8650,
     },
 }
 
@@ -141,11 +156,18 @@ FEATURE_DISPLAY_NAMES = {
 # ============================================================
 
 def load_recording(file_obj):
-    """Load an uploaded .txt FSCV recording into a 2D array (voltage x time)."""
+    """Load an uploaded .txt FSCV recording into a 2D array (voltage x time).
+    Inverted per Bettina's guidance: the raw .txt files use a sign
+    convention that renders backwards on Pablo's colormap. This flips the
+    sign at the source, matching the fix applied in make_windows_*.py and
+    the labelling apps -- all three deployed bundles were retrained on
+    sign-corrected data, so this is safe now (previously this was handled
+    as a display-only workaround in app.py; that workaround should be
+    removed now that this is fixed here, to avoid inverting twice)."""
     arr = np.loadtxt(file_obj)
     if arr.ndim == 1:
         arr = arr[np.newaxis, :]
-    return arr
+    return -arr
 
 
 def window_recording(arr, cfg, bg_subtract=True):
@@ -212,7 +234,7 @@ def extract(arr, cfg):
     return {
         "peak_current": float(ox.max()),
         "peak_voltage": float(ox.mean(axis=1).argmax() + v0),
-        "peak_width": float((ox.mean(axis=1) > ox.mean(axis=1).max() * 0.5).sum()),
+        "peak_width": float((ox_trace > ox_trace.max() * 0.5).sum()),
         "trough_current": float(red.min()),
         "auc_sero": float(np.abs(ox).sum()),
         "auc_full": float(np.abs(arr).sum()),
@@ -325,12 +347,8 @@ def load_bundle_models(bundle):
 def predict_windows(bundle, models, windows):
     """
     Run the bundle's model(s) on every window of one uploaded file.
-    Returns: proba array (n_windows, n_classes), and the 17-feature
-    array (n_windows, 17) if this bundle uses engineered features
-    (ensemble bundles always; MLP-only bundle only if needed for stat
-    cards — computed lazily by the caller instead).
+    Returns: proba array (n_windows, n_classes).
     """
-    n_windows = len(windows)
     X_raw = np.array([w.flatten() for w in windows], dtype=np.float32)
 
     mlp_info = models["mlp"]
@@ -341,10 +359,10 @@ def predict_windows(bundle, models, windows):
 
     if bundle["model_type"] == "mlp_only":
         proba = mlp_proba.copy()
-        boost = bundle.get("boost")
-        if boost:
-            idx, factor = boost["class_idx"], boost["factor"]
-            proba[:, idx] *= factor
+        boosts = bundle.get("boost")
+        if boosts:
+            for b in boosts:
+                proba[:, b["class_idx"]] *= b["factor"]
             proba = proba / proba.sum(axis=1, keepdims=True)
         return proba
 
