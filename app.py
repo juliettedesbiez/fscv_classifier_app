@@ -150,6 +150,40 @@ input:focus, textarea:focus {{
     box-shadow: 0 0 0 1px {ACCENT} !important;
     outline-color: {ACCENT} !important;
 }}
+/* Confidence threshold slider — track fill, thumb, and the live value
+   bubble shown while dragging, all recoloured pink. Streamlit slider
+   internals use BaseWeb; selectors confirmed against current Streamlit,
+   but re-check via browser inspector if a future Streamlit update shifts
+   the DOM structure, same as the file-chip fix earlier. */
+div[data-testid="stSlider"] div[role="slider"] {{
+    background-color: {ACCENT} !important;
+    border-color: {ACCENT} !important;
+}}
+div[data-testid="stSlider"] div[data-baseweb="slider"] > div > div {{
+    background-color: {ACCENT} !important;
+}}
+div[data-testid="stSlider"] [data-testid="stThumbValue"] {{
+    color: {ACCENT} !important;
+    font-weight: 700;
+}}
+div[data-testid="stSlider"] [role="slider"]::before {{
+    background-color: {ACCENT} !important;
+}}
+/* Tabs (High confidence / Below threshold / All results) — selected tab
+   label and its underline indicator recoloured pink. */
+button[data-baseweb="tab"] {{
+    color: #666 !important;
+}}
+button[data-baseweb="tab"][aria-selected="true"] {{
+    color: {ACCENT} !important;
+    font-weight: 700;
+}}
+button[data-baseweb="tab"]:hover {{
+    color: {ACCENT} !important;
+}}
+div[data-baseweb="tab-highlight"] {{
+    background-color: {ACCENT} !important;
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -375,7 +409,7 @@ with content_area.container():
                 summary_rows.append({
                     "File": r["filename"],
                     "Classification": labels[r["file_class"]],
-                    "Confidence": f"{r['confidence']:.3f}",
+                    "Confidence": round(r["confidence"], 4),  # numeric, for threshold filtering
                 })
                 row = {
                     "file": r["filename"],
@@ -389,27 +423,67 @@ with content_area.container():
                 full_rows.append(row)
 
             summary_df = pd.DataFrame(summary_rows)
-            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            full_df = pd.DataFrame(full_rows)
 
-            col_a, col_b = st.columns(2)
-            with col_a:
+            # --- Confidence threshold, adjustable live -- default 0.70 (see
+            # discussion: recall-favouring, so the "confident" bucket stays
+            # inclusive and a real event rarely lands only in the low-
+            # confidence table). Nothing is ever deleted -- all three tables
+            # are just different views over the same results.
+            threshold = st.slider(
+                "Confidence threshold", min_value=0.0, max_value=1.0, value=0.70, step=0.01,
+                help="Splits results below into three tables by this cutoff. Nothing is "
+                     "excluded from the batch -- the 'All results' table always has everything.",
+            )
+
+            high_df = summary_df[summary_df["Confidence"] >= threshold].reset_index(drop=True)
+            low_df = summary_df[summary_df["Confidence"] < threshold].reset_index(drop=True)
+
+            tab_high, tab_low, tab_all = st.tabs([
+                f"✅ High confidence (≥{threshold:.2f}) — {len(high_df)}",
+                f"⚠️ Below threshold (<{threshold:.2f}) — {len(low_df)}",
+                f"All results — {len(summary_df)}",
+            ])
+
+            with tab_high:
+                st.dataframe(high_df, use_container_width=True, hide_index=True)
+                st.download_button(
+                    "Download high-confidence CSV",
+                    data=high_df.to_csv(index=False).encode("utf-8"),
+                    file_name="fscv_high_confidence.csv",
+                    mime="text/csv",
+                    key="dl_high",
+                )
+            with tab_low:
+                st.caption("Below the confidence threshold — worth a manual look before trusting these calls.")
+                st.dataframe(low_df, use_container_width=True, hide_index=True)
+                st.download_button(
+                    "Download below-threshold CSV",
+                    data=low_df.to_csv(index=False).encode("utf-8"),
+                    file_name="fscv_below_threshold.csv",
+                    mime="text/csv",
+                    key="dl_low",
+                )
+            with tab_all:
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
                 st.download_button(
                     "Download batch summary CSV (simple)",
                     data=summary_df.to_csv(index=False).encode("utf-8"),
                     file_name="fscv_batch_summary.csv",
                     mime="text/csv",
                     help="File, classification, confidence — one row per recording.",
+                    key="dl_all",
                 )
-            with col_b:
-                full_df = pd.DataFrame(full_rows)
-                st.download_button(
-                    "Download full batch results CSV (with all stats)",
-                    data=full_df.to_csv(index=False).encode("utf-8"),
-                    file_name="fscv_batch_full_results.csv",
-                    mime="text/csv",
-                    help="Everything in the summary, plus amplitude, rise/decay time, peak width, "
-                         "AUC, Ox/Red ratio and lag, and window counts for every recording.",
-                )
+
+            st.download_button(
+                "Download full batch results CSV (with all stats)",
+                data=full_df.to_csv(index=False).encode("utf-8"),
+                file_name="fscv_batch_full_results.csv",
+                mime="text/csv",
+                help="Everything in the summary, plus amplitude, rise/decay time, peak width, "
+                     "AUC, Ox/Red ratio and lag, and window counts for every recording — "
+                     "all files, unfiltered by threshold.",
+            )
 
             st.divider()
             st.subheader("File detail")
@@ -478,13 +552,19 @@ with content_area.container():
                 ax.axvspan(f0 / fscv_hz, f1 / fscv_hz, color=ACCENT, alpha=0.25, lw=0)
 
             # Mark the exact peak-amplitude point (from the representative
-            # event window's features) with a labelled marker. Only drawn
-            # for non-baseline files, where features/rep_window_start exist.
+            # event window's features) with a labelled marker, a horizontal
+            # guide line across the full plot width, and a highlighted tick
+            # on the y-axis showing exactly what voltage it crosses. Only
+            # drawn for non-baseline files, where features/rep_window_start
+            # exist.
+            peak_tick_row = None
             if r["features"] is not None and r["rep_window_start"] is not None:
                 peak_frame_abs = r["rep_window_start"] + r["features"]["rise_time"]
                 peak_row = r["features"]["peak_voltage"]
                 peak_time_s = peak_frame_abs / fscv_hz
                 peak_amp = r["features"]["peak_current"]
+
+                peak_tick_row = int(round(np.clip(peak_row, 0, nV - 1)))
 
                 ax.scatter([peak_time_s], [peak_row], s=90, marker="*",
                            color="white", edgecolor=ACCENT, linewidth=1.5, zorder=5)
@@ -497,6 +577,12 @@ with content_area.container():
                               edgecolor=ACCENT, alpha=0.9),
                     zorder=6,
                 )
+                # Horizontal guide line across the full plot width, crossing
+                # the y-axis at the peak's voltage -- makes the exact
+                # voltage directly readable off the axis, not just the
+                # marker's position within the plot.
+                ax.axhline(y=peak_row, color=ACCENT, linestyle="--",
+                           linewidth=1.2, alpha=0.7, zorder=4)
 
             # Real voltage values on the y-axis instead of raw row index.
             # The Jackson waveform is non-monotonic (rises 0.2V->1.0V, falls
@@ -506,8 +592,21 @@ with content_area.container():
             n_ticks = 8
             tick_rows = np.linspace(0, nV - 1, n_ticks).astype(int)
             tick_rows = np.clip(tick_rows, 0, len(VOLTAGE_VALUES) - 1)
+
+            # Add the peak's exact row as an extra labelled tick, so the
+            # voltage it crosses the y-axis at is directly readable --
+            # highlighted in the same accent colour as the marker/guide line.
+            if peak_tick_row is not None and peak_tick_row not in tick_rows:
+                tick_rows = np.append(tick_rows, peak_tick_row)
+            tick_rows = np.sort(tick_rows)
+
             ax.set_yticks(tick_rows)
             ax.set_yticklabels([f"{VOLTAGE_VALUES[i]:.2f}" for i in tick_rows])
+            if peak_tick_row is not None:
+                for tick_row, tick_label in zip(tick_rows, ax.get_yticklabels()):
+                    if tick_row == peak_tick_row:
+                        tick_label.set_color(ACCENT)
+                        tick_label.set_fontweight("bold")
             ax.set_ylabel("Voltage (V)")
             ax.set_title(f"{r['filename']} \u2014 {len(r['event_spans'])} event window(s) highlighted")
             ax.tick_params(labelbottom=False)
