@@ -77,7 +77,7 @@ Opens at `localhost:8501`.
 
 | Mode | Classes | Model | Held-out test F1_macro |
 |---|---|---|---|
-| Serotonergic Spheroid — 3-class | Baseline / Spontaneous / Stimulated | MLP only, two-part probability boost (spontaneous ×0.10, stimulated ×1.00) tuned via CV out-of-fold sweep, applied before argmax | 0.7267 (MCC 0.664) |
+| Serotonergic Spheroid — 3-class | Baseline / Spontaneous / Stimulated | MLP only, two-part probability boost (spontaneous ×0.10, stimulated ×1.00) tuned via CV out-of-fold sweep, applied before argmax | 0.7267 |
 | Serotonergic Spheroid — Binary | Baseline / Serotonin | RF + XGB + MLP soft-voting ensemble | 0.8712 |
 | Organoid — Binary | No Event / Event | RF + XGB + MLP soft-voting ensemble | 0.8650 |
 
