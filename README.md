@@ -1,19 +1,14 @@
 # FSCV Event Classifier
-
 A local Streamlit tool for classifying FSCV recordings using one of three
 validated, pre-trained modes. Built for Hashemi Lab scientists who run FSCV
 experiments but don't run the ML pipeline themselves.
-
 ## Setup
-
 ```bash
 pip install -r requirements.txt
 ```
-
 The `models/` folder ships with the app (self-contained, no OneDrive
 dependency) and must stay alongside `app.py` and `fscv_core.py`, along with
 `assets/`, `data/`, and `.streamlit/`:
-
 ```
 fscv_app/
 ├── app.py
@@ -35,17 +30,12 @@ fscv_app/
     ├── xgb_model_ipsc_binary.pkl
     └── xgb_model_organoid.pkl
 ```
-
 ## Run
-
 ```bash
 streamlit run app.py
 ```
-
 Opens at `localhost:8501`.
-
 ## What it does
-
 1. **Choose a mode** — Serotonergic Spheroid 3-class (MLP only),
    Serotonergic Spheroid binary (RF+XGB+MLP ensemble), or Organoid binary
    (RF+XGB+MLP ensemble). Each mode has its preparation config, model
@@ -54,10 +44,19 @@ Opens at `localhost:8501`.
 2. **Optionally rename the display labels** for that mode's classes
    (e.g. "Event" instead of "No Event"). Cosmetic only — never changes what
    the model actually classifies.
-3. **Upload one or more `.txt` FSCV recordings** (batch supported). Files
-   should already be passed through a Butterworth low-pass filter (5000 Hz
-   cutoff, five times the 1000 V/s scan rate) before uploading — the app
-   applies background subtraction automatically, but not this filtering.
+3. **Upload one or more `.txt` FSCV recordings** (batch supported). Upload
+   files exactly as your acquisition software outputs them — do **not**
+   manually invert the sign yourself before uploading. `fscv_core.py`'s
+   `load_recording()` inverts the array internally at load time to match
+   the sign convention the trained models expect; a file that's already
+   been flipped before upload will end up inverted twice and read
+   backwards. The visual symptom of an un-inverted file is easy to spot on
+   the colour plot: oxidation would render blue and reduction green —
+   backwards from the correct convention (oxidation green, reduction blue)
+   that Pablo's colormap is built around. Files should also already be
+   passed through a Butterworth low-pass filter (5000 Hz cutoff, five
+   times the 1000 V/s scan rate) before uploading — the app applies
+   background subtraction automatically, but not this filtering.
 4. **Run classification.** The app windows each recording (2s windows,
    stride=5 frames), classifies every window, and aggregates to a
    file-level call via the "any event override" rule: any non-baseline
@@ -72,9 +71,7 @@ Opens at `localhost:8501`.
    amplitude marker with a horizontal guide line and highlighted voltage
    label showing exactly where it crosses the y-axis, a per-window
    breakdown, and per-file CSV export.
-
 ## Bundles at a glance
-
 | Mode | Classes | Model | Held-out test F1_macro |
 |---|---|---|---|
 | Serotonergic Spheroid — 3-class | Baseline / Spontaneous / Stimulated | MLP only, two-part probability boost (spontaneous ×0.10, stimulated ×1.00) tuned via CV out-of-fold sweep, applied before argmax | 0.7267 |
