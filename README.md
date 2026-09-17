@@ -79,3 +79,5 @@ Opens at `localhost:8501`.
 | Organoid — Binary | No Event / Event | RF + XGB + MLP soft-voting ensemble | 0.8650 |
 
 
+AI assistance: 
+Code in this repository was developed in VS Code with GitHub Copilot assistance for code suggestions and debugging. All modelling decisions, analysis choices, and interpretation of results are the author's own.
