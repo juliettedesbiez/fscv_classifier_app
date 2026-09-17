@@ -78,6 +78,23 @@ Opens at `localhost:8501`.
 | Serotonergic Spheroid — Binary | Baseline / Serotonin | RF + XGB + MLP soft-voting ensemble | 0.8712 |
 | Organoid — Binary | No Event / Event | RF + XGB + MLP soft-voting ensemble | 0.8650 |
 
+## Interpretability
+
+Each deployed model's predictions are backed by interpretability analysis
+(SHAP for XGBoost, permutation feature importance for Random Forest,
+gradient saliency maps for the MLP), and convergence with known FSCV
+electrochemistry is characterised and reported per model as full, partial,
+or absent.
+
+For the **Serotonergic Spheroid — Binary** ensemble, convergence is absent
+for the MLP component specifically (oxidation 0.92×, reduction 0.81×
+enrichment). This is a component-specific limitation: the RF and XGB
+components retain electrochemical justification through their own
+interpretability outputs, but the MLP's gradient saliency maps for this
+mode should not be read as electrochemically grounded. This is documented
+here, and prominently within the app itself, so that a researcher using
+the Spheroid Binary pipeline knows which components of the ensemble carry
+electrochemical justification and which do not.
 
 AI assistance: 
 Code in this repository was developed in VS Code with GitHub Copilot assistance for code suggestions and debugging. All modelling decisions, analysis choices, and interpretation of results are the author's own.
